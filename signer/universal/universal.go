@@ -3,6 +3,8 @@ package universal
 
 import (
 	"crypto/x509"
+	"encoding/pem"
+	"io/ioutil"
 	"net/http"
 
 	"github.com/cloudflare/cfssl/certdb"
@@ -12,6 +14,7 @@ import (
 	"github.com/cloudflare/cfssl/signer"
 	"github.com/cloudflare/cfssl/signer/local"
 	"github.com/cloudflare/cfssl/signer/remote"
+	"github.com/letsencrypt/pkcs11key"
 )
 
 // Signer represents a universal signer which is both local and remote
@@ -47,7 +50,39 @@ func fileBackedSigner(root *Root, policy *config.Signing) (signer.Signer, bool, 
 }
 
 var localSignerList = []localSignerCheck{
+	pkcs11Signer,
 	fileBackedSigner,
+}
+
+// pkcs11Signer looks for token, module, slot, and PIN configuration
+// options in the root.
+func pkcs11Signer(root *Root, policy *config.Signing) (signer.Signer, bool, error) {
+
+	module := root.Config["pkcs11-module"]
+	tokenLabel := root.Config["pkcs11-token-label"]
+	privateKeyLabel := root.Config["pkcs11-private-key-label"]
+	userPIN := root.Config["pkcs11-user-pin"]
+	certFile := root.Config["cert-file"]
+
+	if module == "" && tokenLabel == "" && privateKeyLabel == "" && userPIN == "" {
+		return nil, false, nil
+	}
+
+	// Load public key from cert
+	data, err := ioutil.ReadFile(certFile)
+	block, _ := pem.Decode([]byte(data))
+	if block == nil {
+		panic("failed to parse PEM block containing the public key")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		panic("failed to parse Certificate: " + err.Error())
+	}
+
+	// Get a signer
+	cryptoSigner, err := pkcs11key.New(module, tokenLabel, userPIN, cert.PublicKey)
+	s, err := local.NewSigner(cryptoSigner, cert, signer.DefaultSigAlgo(cryptoSigner), policy)
+	return s, true, err
 }
 
 // PrependLocalSignerToList prepends signer to the local signer's list
@@ -116,7 +151,6 @@ func NewSigner(root Root, policy *config.Signing) (signer.Signer, error) {
 			Default:  config.DefaultConfig(),
 		}
 	}
-
 	if !policy.Valid() {
 		return nil, cferr.New(cferr.PolicyError, cferr.InvalidPolicy)
 	}

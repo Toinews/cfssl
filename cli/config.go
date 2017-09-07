@@ -2,6 +2,7 @@ package cli
 
 import (
 	"flag"
+	"os"
 	"time"
 
 	"github.com/cloudflare/cfssl/config"
@@ -68,6 +69,10 @@ type Config struct {
 	AKI               string
 	DBConfigFile      string
 	CRLExpiration     time.Duration
+	Module            string
+	Token             string
+	PIN               string
+	PKCS11Label       string
 }
 
 // registerFlags defines all cfssl command flags and associates their values with variables.
@@ -128,6 +133,10 @@ func registerFlags(c *Config, f *flag.FlagSet) {
 	f.StringVar(&c.DBConfigFile, "db-config", "", "certificate db configuration file")
 	f.DurationVar(&c.CRLExpiration, "expiry", 7*helpers.OneDay, "time from now after which the CRL will expire (default: one week)")
 	f.IntVar(&log.Level, "loglevel", log.LevelInfo, "Log level (0 = DEBUG, 5 = FATAL)")
+	f.StringVar(&c.Module, "pkcs11-module", "", "PKCS #11 module")
+	f.StringVar(&c.Token, "pkcs11-token-label", "", "PKCS #11 token")
+	f.StringVar(&c.PIN, "pkcs11-user-pin", os.Getenv("USER_PIN"), "PKCS #11 user PIN")
+	f.StringVar(&c.PKCS11Label, "pkcs11-private-key-label", "", "PKCS #11 label")
 }
 
 // RootFromConfig returns a universal signer Root structure that can
@@ -135,8 +144,12 @@ func registerFlags(c *Config, f *flag.FlagSet) {
 func RootFromConfig(c *Config) universal.Root {
 	return universal.Root{
 		Config: map[string]string{
-			"cert-file": c.CAFile,
-			"key-file":  c.CAKeyFile,
+			"cert-file":                c.CAFile,
+			"key-file":                 c.CAKeyFile,
+			"pkcs11-module":            c.Module,
+			"pkcs11-token-label":       c.Token,
+			"pkcs11-private-key-label": c.PKCS11Label,
+			"pkcs11-user-pin":          c.PIN,
 		},
 		ForceRemote: c.Remote != "",
 	}
